@@ -22,25 +22,6 @@ final class MenuController: NSObject, NSMenuDelegate {
   /// Reset on menu close so each open starts collapsed.
   private var isInstalledListExpanded = false
 
-  /// Web catalog the Discover "Browse models" link points at — more models live
-  /// here. Matches the empty-state browse link.
-  ///
-  /// `ref` marks the visit as coming from the app. A link opened from a native
-  /// app carries no referrer, so without it these arrivals are indistinguishable
-  /// from people typing the address in. Analytics reads `ref` as the traffic
-  /// source with no setup on the site.
-  ///
-  /// Named per platform, not per app: a Windows build wants its own value, and
-  /// renaming this one later would split the series where it's most worth
-  /// comparing.
-  private static let browseCatalogUrl = URL(string: "https://llama.app/models?ref=llama-macos")!
-
-  /// Featured catalog suggestions for the Discover section. Fetched from the
-  /// remote catalog on launch (and on menu-open if still empty); empty when the
-  /// fetch hasn't landed or failed, in which case the section simply doesn't show.
-  private var discoverSuggestions: [Catalog.Suggestion] = []
-  private var isLoadingDiscover = false
-
   /// Set of managed model ids reflected in the menu as last built. Lets the
   /// progress observer distinguish a membership change (a download started or
   /// stopped — needs a full rebuild so rows appear/disappear) from a plain
@@ -76,24 +57,6 @@ final class MenuController: NSObject, NSMenuDelegate {
     configureStatusItem()
     setupObservers()
     showWelcomeIfNeeded()
-    loadDiscoverSuggestions()
-  }
-
-  /// Fetches featured catalog suggestions in the background, then rebuilds the
-  /// menu so the Discover section appears. No-op if a fetch is already in flight.
-  private func loadDiscoverSuggestions() {
-    guard !isLoadingDiscover else { return }
-    isLoadingDiscover = true
-    let systemMemoryMb = SystemMemory.memoryMb
-    Task { [weak self] in
-      let suggestions = await Catalog.fetchFeatured(systemMemoryMb: systemMemoryMb)
-      await MainActor.run {
-        guard let self else { return }
-        self.isLoadingDiscover = false
-        self.discoverSuggestions = suggestions
-        self.rebuildMenuIfPossible()
-      }
-    }
   }
 
   /// Opens the menu programmatically, after `delay` seconds.
@@ -244,8 +207,6 @@ final class MenuController: NSObject, NSMenuDelegate {
       updateStatusIcon()
     }
     modelManager.refreshDownloadedModels()
-    // Retry the catalog fetch if it hasn't landed yet (e.g. offline at launch).
-    if discoverSuggestions.isEmpty { loadDiscoverSuggestions() }
   }
 
   func menuDidClose(_ menu: NSMenu) {
@@ -302,11 +263,6 @@ final class MenuController: NSObject, NSMenuDelegate {
       addFolderWarning(to: menu)
     }
 
-    // `managed` was snapshotted above (needed there to resolve the page model);
-    // the rest of the rebuild reuses it for the installed rows, the Discover
-    // filter, the empty-state decision, and the membership snapshot below.
-    let suggestions = visibleDiscoverSuggestions(managed: managed)
-
     // Rows whose tags-hidden title (org prefix + name + params + quant) collides
     // with another installed model's get their id's leftover tags shown as a
     // tiebreaker -- e.g. two "gemma-3 4B Q4_0" installs where one is "it" and
@@ -342,19 +298,10 @@ final class MenuController: NSObject, NSMenuDelegate {
       renderedManagedIds = Set(managed.map(\.id))
       return
     }
-
+      
     // Always render the Installed section — with rows, or the empty placeholder
-    // slot when nothing's installed — so it anchors the menu instead of vanishing
-    // and leaving Recommended as a floating first section.
+    // slot when nothing's installed — so it anchors the menu
     addInstalledSection(to: menu, models: managed, collidingKeys: collidingKeys)
-    addDiscoverSection(to: menu, suggestions: suggestions)
-
-    // The Browse models row lives outside the Recommended section: it's the permanent
-    // escape hatch to the full web catalog, so it stays in the same spot whether
-    // the picks above are present, exhausted (all installed), or unavailable
-    // (offline / still loading).
-    menu.addItem(NSMenuItem.viewItem(with: SeparatorView()))
-    menu.addItem(NSMenuItem.viewItem(with: BrowseModelsRow(url: Self.browseCatalogUrl)))
 
     addFooter(to: menu)
 
@@ -772,51 +719,6 @@ final class MenuController: NSObject, NSMenuDelegate {
     }))
   }
 
-  // MARK: - Discover Section
-
-  /// Featured suggestions minus anything already installed, downloading, or
-  /// paused — matched quant-agnostically by running the suggestion's repo
-  /// through the same id grammar (`Model.idBase`) the resolver and cache scan
-  /// use, so native (ggml-org) models' short ids compare correctly.
-  private func visibleDiscoverSuggestions(managed: [Model]) -> [Catalog.Suggestion] {
-    let managedIdBases = Set(managed.map(\.idBase))
-    return discoverSuggestions.filter {
-      !managedIdBases.contains(Model.idBase(orgSlashRepo: $0.repo))
-    }
-  }
-
-  /// Adds the "Discover" section: a short list of featured models — up to two
-  /// device-appropriate picks per family — that install with a single click.
-  /// The whole section (divider + header + rows) is omitted when there's nothing
-  /// to suggest; the standalone Browse models row below it covers that state.
-  private func addDiscoverSection(to menu: NSMenu, suggestions: [Catalog.Suggestion]) {
-    guard !suggestions.isEmpty else { return }
-
-    menu.addItem(NSMenuItem.viewItem(with: SeparatorView()))
-
-    // Self-describing header: a curated subset recommended for this Mac
-    // ("recommended" signals it's not the full compatible set, and the per-Mac
-    // framing explains why a family can appear at two sizes).
-    let header = SectionHeaderView(title: "Recommended for your Mac")
-    menu.addItem(NSMenuItem.viewItem(with: header))
-
-    for suggestion in suggestions {
-      let view = CatalogItemView(suggestion: suggestion) { [weak self] suggestion in
-        self?.installSuggestion(suggestion)
-      }
-      menu.addItem(NSMenuItem.viewItem(with: view))
-    }
-  }
-
-  /// Starts a download for a catalog suggestion via the shared deeplink installer.
-  /// The resolve is async (a network round-trip), so we deliberately don't rebuild
-  /// here — doing so would flash the empty state while `managedModels` is still
-  /// empty. Once the download actually starts, the downloads observer sees the
-  /// membership change and rebuilds: the new row appears under Installed and the
-  /// suggestion drops out of Discover automatically (its repo is now managed).
-  private func installSuggestion(_ suggestion: Catalog.Suggestion) {
-    DeeplinkHandler.shared.install(repo: suggestion.repo, quant: suggestion.quant, announce: false)
-  }
 
   private func openModelPage(_ modelId: String) {
     selectedModelId = modelId

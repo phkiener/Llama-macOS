@@ -1,5 +1,10 @@
 # Llama
 
+A fork of [Llama-macOS](https://github.com/ggml-org/Llama-macOS) that gets rid of the "discover" and "browse" thingies.
+It's got the same app identifier and all, so don't even try to run this side-by-side with the original.
+
+---
+
 Llama is a macOS menu bar app for running local LLMs.
 
 [Watch a 2-minute intro](https://www.youtube.com/watch?v=7AieF7rZUTc) 📽️
@@ -12,11 +17,7 @@ Llama is a macOS menu bar app for running local LLMs.
 
 ## Install
 
-```sh
-brew install --cask llama-app
-```
-
-Or download from [Releases](https://github.com/ggml-org/Llama-macOS/releases).
+Ddownload from [Releases](https://github.com/phkiener/Llama-macOS/releases).
 
 ## How it works
 
