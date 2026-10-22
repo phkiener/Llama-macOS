@@ -1,0 +1,35 @@
+name: Build app bundle
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set version for release
+        run: sed -i '' 's/MARKETING_VERSION = 0.0.0;/MARKETING_VERSION = ${{ github.ref_name }};/' Llama.xcodeproj/project.pbxproj
+
+      - name: Select Xcode version
+        run: sudo xcode-select -switch /Applications/Xcode_16.4.app
+
+      - name: Build archive
+        run: xcodebuild -scheme Llama -configuration Release -archivePath build/Llama.xcarchive archive
+
+      - name: Export app bundle from archive
+        run: xcodebuild -exportArchive -exportPath build/ -exportOptionsPlist Llama/ExportOptions.plist -archivePath build/Llama.xcarchive
+
+      - name: Create image from app bundle
+        run: hdiutil create -fs HFS+ -volname Llama -srcfolder build/Llama.app build/Llama-${{ github.ref_name }}.dmg
+
+      - name: Attach image to release
+        run: gh release upload ${{ github.ref_name }} build/Llama-${{ github.ref_name }}.dmg
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

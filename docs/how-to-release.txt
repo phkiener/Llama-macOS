@@ -1,8 +1,0 @@
-When a new version drops in the upstream:
-
-- Sync fork (wanna try the GitHub UI for that)
-- Xcode: Update version in project info
-- Xcode: Product -> Archive -> Distribute App; select "Custom", then "Copy app"
-- Disk Utility: File -> New Image -> Image from Folder; select the folder containing the .app bundle
-- Create release (copy details from upstream), attach the .dmg, done
-
