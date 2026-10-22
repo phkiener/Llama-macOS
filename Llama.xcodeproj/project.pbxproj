@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		154EE9712EA64E200083FDEE /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 154EE9702EA64E200083FDEE /* Sentry */; };
-		156891D32E268C5F00F71BD4 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 156891D22E268C5F00F71BD4 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,7 +40,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				156891D32E268C5F00F71BD4 /* Sparkle in Frameworks */,
 				154EE9712EA64E200083FDEE /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -85,7 +83,6 @@
 			);
 			name = Llama;
 			packageProductDependencies = (
-				156891D22E268C5F00F71BD4 /* Sparkle */,
 				154EE9702EA64E200083FDEE /* Sentry */,
 			);
 			productName = Llama;
@@ -117,7 +114,6 @@
 			mainGroup = 156891932E2685F700F71BD4;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				156891D12E268C5F00F71BD4 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				154EE96F2EA64E200083FDEE /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -292,7 +288,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.45.0;
+				MARKETING_VERSION = 0.45.1;
 				PRODUCT_BUNDLE_IDENTIFIER = app.llama.Llama.dev;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -326,7 +322,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.45.0;
+				MARKETING_VERSION = 0.45.1;
 				PRODUCT_BUNDLE_IDENTIFIER = app.llama.Llama;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -369,14 +365,6 @@
 				minimumVersion = 8.57.0;
 			};
 		};
-		156891D12E268C5F00F71BD4 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/sparkle-project/Sparkle";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.7.1;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -384,11 +372,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 154EE96F2EA64E200083FDEE /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
 			productName = Sentry;
-		};
-		156891D22E268C5F00F71BD4 /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 156891D12E268C5F00F71BD4 /* XCRemoteSwiftPackageReference "Sparkle" */;
-			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

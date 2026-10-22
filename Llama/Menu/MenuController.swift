@@ -9,9 +9,6 @@ final class MenuController: NSObject, NSMenuDelegate {
   private let modelManager = ModelManager.shared
   private let server = LlamaServer.shared
   private let actionHandler = ModelActionHandler()
-  /// Runs Sparkle's update check. Handed in by the app delegate, which owns
-  /// the updater.
-  private let checkForUpdates: () -> Void
 
   // Section State
   /// The installed model whose detail page is currently replacing the list.
@@ -49,9 +46,8 @@ final class MenuController: NSObject, NSMenuDelegate {
   // Store observer tokens for proper cleanup
   private var observers: [NSObjectProtocol] = []
 
-  init(checkForUpdates: @escaping () -> Void) {
+  override init() {
     self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    self.checkForUpdates = checkForUpdates
     super.init()
 
     configureStatusItem()
@@ -458,7 +454,6 @@ final class MenuController: NSObject, NSMenuDelegate {
     let footerView = FooterView(
       llamaVersion: LlamaInstallManager.shared.currentVersion?.tag,
       llamaOrigin: LlamaInstallManager.shared.currentOrigin,
-      onCheckForUpdates: checkForUpdates,
       onOpenSettings: { [weak self] in self?.openSettings() },
       onQuit: { [weak self] in self?.quitApp() }
     )

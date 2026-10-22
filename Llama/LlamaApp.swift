@@ -1,6 +1,5 @@
 import AppKit
 import Sentry
-import Sparkle
 import SwiftUI
 import os.log
 
@@ -25,7 +24,6 @@ struct LlamaApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-  private var updaterController: SPUStandardUpdaterController?
   private let logger = Logger(subsystem: Logging.subsystem, category: "AppDelegate")
   private var menuController: MenuController?
   private var networkExposureGuard: NetworkExposureGuard?
@@ -119,27 +117,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // later opt-out in Settings).
     LaunchAtLogin.enableOnFirstLaunch()
 
-    // Set up automatic updates using Sparkle framework
-    // Skip starting the updater for debug builds to avoid false update prompts
-    #if DEBUG
-      let startUpdater = false
-    #else
-      let startUpdater = true
-    #endif
-    updaterController = SPUStandardUpdaterController(
-      startingUpdater: startUpdater,
-      // Capture errors and events for logging/troubleshooting
-      updaterDelegate: self,
-      // Use our custom UI handling for gentle reminders
-      userDriverDelegate: self
-    )
-    // Send the same User-Agent as model and engine downloads. The feed URL
-    // redirects to a Hugging Face bucket, so update checks then show up in HF's
-    // logs under one identifier with the rest of the app's HF traffic. Sparkle's
-    // default would be `Llama/<version> Sparkle/<version>`.
-    // No HF token: it's there for gated downloads, not for background checks.
-    updaterController?.updater.userAgentString = AppInfo.userAgent
-
     // Scan the model cache and write models.ini, before anything reads either.
     // Synchronous on purpose: the server reads models.ini once at start, so it
     // has to be current first, and `scanNow()` explains why that ordering can't
@@ -147,9 +124,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     ModelManager.shared.scanNow()
 
     // Create the AppKit-based status bar menu (installed models only for now)
-    menuController = MenuController(checkForUpdates: { [weak self] in
-      self?.updaterController?.checkForUpdates(nil)
-    })
+    menuController = MenuController()
 
     // Scope network access to the network it was granted on, so the setting
     // doesn't follow the laptop onto someone else's wifi.
@@ -180,40 +155,5 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Gracefully stop the llama-server process when app quits
     LlamaServer.shared.stop()
-  }
-}
-
-// MARK: - SPUStandardUserDriverDelegate
-
-extension AppDelegate: SPUStandardUserDriverDelegate {
-  // Tells Sparkle this app supports gentle reminders for background update checks.
-  // This prevents intrusive modal dialogs and allows us to show dock badges instead.
-  var supportsGentleScheduledUpdateReminders: Bool {
-    true
-  }
-
-  // Called when Sparkle is about to show an update dialog.
-  // We use this to switch from menu bar mode to dock app mode so the dialog appears properly.
-  func standardUserDriverWillHandleShowingUpdate(
-    _ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState
-  ) {
-    // Always show in dock when update dialog will appear
-    NSApp.setActivationPolicy(.regular)
-  }
-
-  // Called when the update process is completely finished (installed, skipped, or dismissed).
-  // We use this to return the app to menu bar mode.
-  func standardUserDriverWillFinishUpdateSession() {
-    // Return to menu bar mode
-    NSApp.setActivationPolicy(.accessory)
-  }
-}
-
-// MARK: - SPUUpdaterDelegate
-
-extension AppDelegate: SPUUpdaterDelegate {
-  func updater(_ updater: SPUUpdater, didFailToCheckForUpdatesWithError error: Error) {
-    logger.error(
-      "Sparkle: failed to check for updates: \(error.localizedDescription, privacy: .public)")
   }
 }

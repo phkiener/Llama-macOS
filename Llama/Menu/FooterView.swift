@@ -1,7 +1,6 @@
 import AppKit
 
 final class FooterView: ItemView {
-  private let onCheckForUpdates: () -> Void
   private let onOpenSettings: () -> Void
   private let onQuit: () -> Void
   /// Build of the `llama` binary actually in use, or nil if not yet known.
@@ -13,13 +12,11 @@ final class FooterView: ItemView {
   init(
     llamaVersion: String?,
     llamaOrigin: LlamaBinaries.Origin,
-    onCheckForUpdates: @escaping () -> Void,
     onOpenSettings: @escaping () -> Void,
     onQuit: @escaping () -> Void
   ) {
     self.llamaVersion = llamaVersion
     self.llamaOrigin = llamaOrigin
-    self.onCheckForUpdates = onCheckForUpdates
     self.onOpenSettings = onOpenSettings
     self.onQuit = onQuit
     super.init(frame: .zero)
@@ -37,8 +34,7 @@ final class FooterView: ItemView {
   private func setup() {
     // Version label -- a plain label (not an NSButton) so its text starts at the
     // exact content edge; a borderless button's cell adds a ~2px inset that left
-    // it looking misaligned against the header and model rows. Clickable via a
-    // gesture, matching the menu's other inline links (WebUI, "models").
+    // it looking misaligned against the header and model rows.
     let versionLabel = Theme.secondaryLabel()
     versionLabel.attributedStringValue = NSAttributedString(
       string: appVersionText,
@@ -46,9 +42,6 @@ final class FooterView: ItemView {
     )
     versionLabel.isSelectable = false
     versionLabel.translatesAutoresizingMaskIntoConstraints = false
-    let versionClick = NSClickGestureRecognizer(
-      target: self, action: #selector(checkForUpdatesClicked))
-    versionLabel.addGestureRecognizer(versionClick)
 
     // Llama Version Label -- the build of the binary actually being driven.
     // Unmanaged installs get a marker ("· brew" for Homebrew, "· ext" for
@@ -95,7 +88,6 @@ final class FooterView: ItemView {
     ])
   }
 
-  @objc private func checkForUpdatesClicked() { onCheckForUpdates() }
   @objc private func openSettingsClicked() { onOpenSettings() }
   @objc private func quitClicked() { onQuit() }
 
