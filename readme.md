@@ -3,6 +3,13 @@
 A fork of [Llama-macOS](https://github.com/ggml-org/Llama-macOS) that gets rid of the "discover" and "browse" thingies.
 It's got the same app identifier and all, so don't even try to run this side-by-side with the original.
 
+Also, the app is *not* signed. Screw that. Either manually allow execution in the settings after the first
+(cancelled) launch, or run this snippet **after** coyping the app bundle to `/Applications`:
+
+```shell
+sudo xattr -rd com.apple.quarantine /Applications/Llama.app
+```
+
 ---
 
 Llama is a macOS menu bar app for running local LLMs.
@@ -17,7 +24,7 @@ Llama is a macOS menu bar app for running local LLMs.
 
 ## Install
 
-Ddownload from [Releases](https://github.com/phkiener/Llama-macOS/releases).
+Download from [Releases](https://github.com/phkiener/Llama-macOS/releases).
 
 ## How it works
 
