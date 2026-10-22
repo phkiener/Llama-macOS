@@ -7,7 +7,7 @@ Also, the app is *not* signed. Screw that. Either manually allow execution in th
 (cancelled) launch, or run this snippet **after** coyping the app bundle to `/Applications`:
 
 ```shell
-sudo xattr -rd com.apple.quarantine /Applications/Llama.app
+xattr -rd com.apple.quarantine /Applications/Llama.app
 ```
 
 ---
