@@ -294,7 +294,7 @@ final class MenuController: NSObject, NSMenuDelegate {
       renderedManagedIds = Set(managed.map(\.id))
       return
     }
-      
+
     // Always render the Installed section — with rows, or the empty placeholder
     // slot when nothing's installed — so it anchors the menu
     addInstalledSection(to: menu, models: managed, collidingKeys: collidingKeys)
