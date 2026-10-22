@@ -24,7 +24,13 @@ Llama is a macOS menu bar app for running local LLMs.
 
 ## Install
 
-Download from [Releases](https://github.com/phkiener/Llama-macOS/releases).
+Download from [Releases](https://github.com/phkiener/Llama-macOS/releases) or use *homebrew*:
+
+```shell
+brew install phkiener/personal/llama-app
+```
+
+(For both cases, you'll have to manually silence the gatekeeper.)
 
 ## How it works
 
