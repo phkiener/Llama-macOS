@@ -46,7 +46,9 @@ enum HFRepoResolver {
     case noGgufFiles(String)
     case quantNotFound(repo: String, quant: String)
     case shardMissing(repo: String, shard: String)
-    case noCompatibleFile(repo: String)
+    /// Every quant in the repo is over this Mac's memory budget. Carries the
+    /// smallest one so the alert can name it.
+    case noCompatibleFile(repo: String, smallestQuant: String, smallestBytes: Int64)
 
     var errorDescription: String? {
       switch self {
@@ -64,8 +66,8 @@ enum HFRepoResolver {
         return "No \(quant) file found in \(repo)."
       case .shardMissing(let repo, let shard):
         return "Shard \(shard) is missing from \(repo)."
-      case .noCompatibleFile(let repo):
-        return "No quantization in \(repo) fits this Mac’s memory budget."
+      case .noCompatibleFile(let repo, _, _):
+        return "\(repo) is too large for this Mac."
       }
     }
 
@@ -75,8 +77,16 @@ enum HFRepoResolver {
         return "Open Settings > Advanced and paste a Hugging Face access token that has access to this repo."
       case .networkUnavailable:
         return "Check your internet connection and try again."
-      case .noCompatibleFile:
-        return "Open the repo page on Hugging Face and pick a smaller quant manually."
+      case .noCompatibleFile(_, let quant, let bytes):
+        // An explanation, not a next step. This error means no quant in the
+        // repo fits, and the download step would refuse any of them, so
+        // there's nothing to pick -- sending people to the repo page to choose
+        // one only led them to the browser's Download button, which saves to
+        // ~/Downloads where the app never looks.
+        // Non-breaking space so the alert never wraps between "243.6" and "GB".
+        let size = Format.gigabytes(bytes).replacingOccurrences(of: " ", with: "\u{00A0}")
+        return
+          "Its smallest quant, \(quant) (\(size)), needs more memory than this Mac can give a model."
       default:
         return nil
       }
@@ -296,7 +306,17 @@ enum HFRepoResolver {
     // picks BF16/F16 over smaller quants in repos that have them, which is
     // exactly the surprise we're trying to avoid.
     guard let best = preferred ?? largest(compatible, siblings: siblings, repo: repo) else {
-      throw ResolveError.noCompatibleFile(repo: repo)
+      // Nothing fits. A file with an unknown size counts as fitting above, so
+      // every candidate has a size here; the `?? 0` never applies.
+      let sized = allGgufs.map {
+        ($0, estimatedModelBytes(for: $0, siblings: siblings, repo: repo) ?? 0)
+      }
+      let (smallest, bytes) = sized.min { $0.1 < $1.1 }!  // allGgufs is non-empty (guarded above)
+      // Prefer the quant tag ("IQ3_S"); a name the parsers can't read
+      // falls back to the file name rather than showing "unknown".
+      let tag = GGUFQuant.tag(forPath: smallest.rfilename)
+      let quant = tag == "unknown" ? (smallest.rfilename as NSString).lastPathComponent : tag
+      throw ResolveError.noCompatibleFile(repo: repo, smallestQuant: quant, smallestBytes: bytes)
     }
     return Pick(
       rfilename: best.rfilename,

@@ -3,9 +3,10 @@ import Foundation
 import os.log
 
 /// Installs and updates the app-managed `llama` CLI by fetching prebuilt binaries
-/// from the same Hugging Face bucket the official `install.sh` uses, laid out the same way:
-/// the real binary at `~/.llama-app/llama` plus a `~/.local/bin/llama` symlink
-/// so `llama` works from a terminal too.
+/// from the same Hugging Face bucket the official `install.sh` uses: the binary
+/// at `~/.llama-app/llama` plus a `~/.local/bin/llama` symlink to it, so `llama`
+/// works from a terminal too. (`install.sh` itself puts a real copy there
+/// instead, which the app then uses -- see `LlamaBinaries`.)
 ///
 /// macOS ships no zstd and the bucket serves the binary zstd-compressed, so we
 /// fetch the bucket's small standalone `unzstd` helper (cached alongside the
@@ -40,11 +41,11 @@ enum LlamaInstaller {
   /// the next app launch, before the server starts.
   static var stagedPath: String { LlamaBinaries.managedPath + ".staged" }
 
-  /// The on-PATH symlink `install.sh` creates so `llama` works in a terminal.
+  /// The on-PATH symlink the app creates so `llama` works in a terminal.
+  private static var symlinkPath: String { LlamaBinaries.pathEntry }
   private static var symlinkDir: String {
-    (NSHomeDirectory() as NSString).appendingPathComponent(".local/bin")
+    (symlinkPath as NSString).deletingLastPathComponent
   }
-  private static var symlinkPath: String { symlinkDir + "/llama" }
 
   enum InstallError: Error, LocalizedError {
     case unsupportedHardware(String)
@@ -191,11 +192,11 @@ enum LlamaInstaller {
     }
   }
 
-  /// Mirrors `install.sh`'s `ln -sf`: point `~/.local/bin/llama` at our
-  /// binary so it's available in a terminal. Best-effort -- the app resolves the
-  /// real path directly, so a failure here doesn't break the app. We won't
-  /// clobber a real file a user may have placed there; only absent or symlink
-  /// entries are (re)written.
+  /// Points `~/.local/bin/llama` at our binary so it's available in a terminal.
+  /// Best-effort -- the app resolves the real path directly, so a failure here
+  /// doesn't break the app. We won't clobber a real file there (an `install.sh`
+  /// copy, which `LlamaBinaries` would have resolved to anyway); only absent or
+  /// symlink entries are (re)written.
   private static func linkOnPath() {
     let fm = FileManager.default
     do {

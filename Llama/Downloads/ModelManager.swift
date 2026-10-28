@@ -219,7 +219,8 @@ class ModelManager: NSObject, URLSessionDataDelegate {
         // bails on the missing plan below.
         self.activeDownloads[modelId]?.plan = plan
         self.logger.info("HF download plan ready for \(model.displayName): \(plan.repoDir)")
-        self.startDownloadTasks(model: model, files: filesToDownload)
+        let unlinked = self.linkCachedFiles(for: model, plan: plan, downloading: filesToDownload)
+        self.startDownloadTasks(model: model, files: filesToDownload + unlinked)
       }
     }
   }
@@ -417,6 +418,9 @@ class ModelManager: NSObject, URLSessionDataDelegate {
     // Optimistically update state immediately for responsive UI
     downloadedModels.removeAll { $0.id == model.id }
     resolvedPaths.removeValue(forKey: model.id)
+    // Files the other installed models use, which deletion has to leave alone
+    // (see `deleteModelFiles`). Read here, while `resolvedPaths` is on hand.
+    let inUse = resolvedPaths.values.flatMap(\.allPaths)
     syncServer()
     NotificationCenter.default.post(name: .LBModelDownloadedListDidChange, object: self)
 
@@ -432,7 +436,8 @@ class ModelManager: NSObject, URLSessionDataDelegate {
           try HFCache.deleteModelFiles(
             cacheDir: cacheDir,
             repoDir: paths.hfRepoDirName,
-            paths: paths
+            paths: paths,
+            keeping: inUse
           )
         }
       } catch {
@@ -945,6 +950,42 @@ class ModelManager: NSObject, URLSessionDataDelegate {
     return files
   }
 
+  /// Links the files `filesRequired` skipped into this download's snapshot.
+  ///
+  /// `filesRequired` skips a file that any snapshot of the repo already has --
+  /// typically the mmproj or draft head another quant brought in earlier. But
+  /// this download lands in the snapshot of `plan.commit`, which is a different
+  /// one once the repo has moved on since that earlier install, and the cache
+  /// scan only pairs a model with sidecars from its own snapshot. Left at that,
+  /// the new quant installs without its mmproj (text-only) or its draft head.
+  /// So each skipped file is linked into this snapshot from its blob.
+  ///
+  /// Returns the skipped files that couldn't be linked -- their blob at
+  /// `plan.commit` isn't on disk (the file changed upstream since, or HF didn't
+  /// disclose its hash) -- so the caller downloads them after all.
+  private func linkCachedFiles(for model: Model, plan: HFDownloadPlan, downloading: [URL])
+    -> [URL]
+  {
+    var unlinked: [URL] = []
+    for url in model.allDownloadUrls where !downloading.contains(url) {
+      let filename = HFCache.repoRelativePath(from: url) ?? url.lastPathComponent
+      if let blobHash = plan.blobHashes[url] {
+        do {
+          if try HFCache.linkCachedBlob(
+            cacheDir: UserSettings.hfCacheDirectory, repoDir: plan.repoDir,
+            commit: plan.commit, blobHash: blobHash, filename: filename)
+          {
+            continue
+          }
+        } catch {
+          logger.error("Failed to link cached \(filename): \(error.localizedDescription)")
+        }
+      }
+      unlinked.append(url)
+    }
+    return unlinked
+  }
+
   /// Checks if a file exists in the HF cache for a given model and remote URL.
   private func hfFileExists(model: Model, url: URL) -> Bool {
     guard let repoDir = model.hfRepoDir else { return false }
@@ -957,7 +998,7 @@ class ModelManager: NSObject, URLSessionDataDelegate {
     guard model.isCompatible() else {
       let reason =
         model.incompatibilitySummary()
-        ?? "isn't compatible with this Mac's memory."
+        ?? "Not compatible with this Mac's memory"
       throw DownloadError.notCompatible(reason: reason)
     }
   }

@@ -40,6 +40,17 @@ enum SafariWebApp {
   /// would. Either step failing falls back to the browser, so a click always
   /// opens something.
   static func open(_ url: URL) -> Bool {
+    #if DEBUG
+      // Demo recordings open chat links in a throwaway viewer instead of the
+      // user's web app or browser, whose tabs and chat history would show up
+      // on camera:
+      //   defaults write app.llama.Llama.dev debugChatOpener <path to .app>
+      if let path = UserDefaults.standard.string(forKey: "debugChatOpener") {
+        NSWorkspace.shared.open(
+          [url], withApplicationAt: URL(fileURLWithPath: path), configuration: NSWorkspace.OpenConfiguration())
+        return true
+      }
+    #endif
     guard let app = installedApp(for: url),
       var link = URLComponents(url: url, resolvingAgainstBaseURL: false)
     else { return false }

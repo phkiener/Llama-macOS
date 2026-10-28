@@ -295,10 +295,8 @@ enum HFCache {
 
   /// Writes a downloaded file into the HF cache layout.
   ///
-  /// 1. Creates directory structure (blobs/, snapshots/{commit}/, refs/)
-  /// 2. Moves temp file → blobs/{sha256}
-  /// 3. Creates symlink snapshots/{commit}/{filename} → ../../blobs/{sha256}
-  /// 4. Writes refs/main with the commit hash
+  /// 1. Moves temp file → blobs/{sha256}
+  /// 2. Links it into the snapshot (see `linkBlob`)
   static func writeBlobAndLink(
     cacheDir: URL,
     repoDir: String,
@@ -309,15 +307,8 @@ enum HFCache {
   ) throws {
     let fm = FileManager.default
 
-    let repoBase = cacheDir.appendingPathComponent(repoDir)
-    let blobsDir = repoBase.appendingPathComponent("blobs")
-    let snapshotDir = repoBase.appendingPathComponent("snapshots").appendingPathComponent(commit)
-    let refsDir = repoBase.appendingPathComponent("refs")
-
-    // Create directories
+    let blobsDir = cacheDir.appendingPathComponent(repoDir).appendingPathComponent("blobs")
     try fm.createDirectory(at: blobsDir, withIntermediateDirectories: true)
-    try fm.createDirectory(at: snapshotDir, withIntermediateDirectories: true)
-    try fm.createDirectory(at: refsDir, withIntermediateDirectories: true)
 
     // Move temp file to blob (atomic within same filesystem).
     // If blob already exists (identical content from concurrent download), just clean up temp.
@@ -327,6 +318,57 @@ enum HFCache {
     } else {
       try fm.moveItem(at: tempFile, to: blobDest)
     }
+
+    try linkBlob(
+      cacheDir: cacheDir, repoDir: repoDir, commit: commit, blobHash: blobHash, filename: filename)
+
+    logger.info("Wrote HF cache: \(repoDir)/blobs/\(blobHash) + snapshot symlink for \(filename)")
+  }
+
+  /// Links a blob that's already in the cache into `snapshots/{commit}/`
+  /// without downloading it again -- what `llama serve -hf` and
+  /// `huggingface_hub` do for a file an earlier download already brought in.
+  /// Returns false, linking nothing, when `blobs/{blobHash}` isn't on disk.
+  static func linkCachedBlob(
+    cacheDir: URL,
+    repoDir: String,
+    commit: String,
+    blobHash: String,
+    filename: String
+  ) throws -> Bool {
+    let blob =
+      cacheDir
+      .appendingPathComponent(repoDir)
+      .appendingPathComponent("blobs")
+      .appendingPathComponent(blobHash)
+    guard FileManager.default.fileExists(atPath: blob.path) else { return false }
+
+    try linkBlob(
+      cacheDir: cacheDir, repoDir: repoDir, commit: commit, blobHash: blobHash, filename: filename)
+
+    logger.info("Linked cached blob \(repoDir)/blobs/\(blobHash) into snapshot for \(filename)")
+    return true
+  }
+
+  /// 1. Creates symlink snapshots/{commit}/{filename} → ../../blobs/{sha256}
+  ///    (replacing whatever is there)
+  /// 2. Writes refs/main with the commit hash
+  private static func linkBlob(
+    cacheDir: URL,
+    repoDir: String,
+    commit: String,
+    blobHash: String,
+    filename: String
+  ) throws {
+    let fm = FileManager.default
+
+    let repoBase = cacheDir.appendingPathComponent(repoDir)
+    let snapshotDir = repoBase.appendingPathComponent("snapshots").appendingPathComponent(commit)
+    let refsDir = repoBase.appendingPathComponent("refs")
+
+    // Create directories
+    try fm.createDirectory(at: snapshotDir, withIntermediateDirectories: true)
+    try fm.createDirectory(at: refsDir, withIntermediateDirectories: true)
 
     // Create symlink: snapshots/{commit}/{filename} → ../../blobs/{sha256}
     // `filename` is repo-relative and may contain a subdir (e.g.
@@ -350,8 +392,6 @@ enum HFCache {
     // Write refs/main with commit hash
     let refsMainFile = refsDir.appendingPathComponent("main")
     try commit.write(to: refsMainFile, atomically: true, encoding: .utf8)
-
-    logger.info("Wrote HF cache: \(repoDir)/blobs/\(blobHash) + snapshot symlink for \(filename)")
   }
 
   /// Lowercase hex of a SHA256 digest -- the form HF names blobs by.
@@ -383,19 +423,28 @@ enum HFCache {
 
   /// Deletes a model's files from the HF cache.
   /// Removes blobs (resolved from symlinks), snapshot symlinks, and cleans up empty dirs.
-  static func deleteModelFiles(cacheDir: URL, repoDir: String, paths: ResolvedPaths) throws {
+  ///
+  /// Leaves alone anything in `inUse` -- the paths of the other installed
+  /// models. Quants of one repo share their mmproj and draft head: the very
+  /// same snapshot symlink when installed at one commit, the same blob when
+  /// installed at different ones. Deleting one quant mustn't take the other's
+  /// sidecars with it -- the scan would then pair the other with nothing, and
+  /// it'd lose image input (or drafting) without a word.
+  static func deleteModelFiles(
+    cacheDir: URL, repoDir: String, paths: ResolvedPaths, keeping inUse: [String]
+  ) throws {
     let fm = FileManager.default
     var blobsToDelete: Set<String> = []
     var symlinksToDelete: [String] = []
 
+    let keptPaths = Set(inUse)
+    let keptBlobs = Set(inUse.compactMap(blobPath(ofSymlink:)))
+
     // Collect blob paths by following symlinks
-    for path in paths.allPaths {
+    for path in paths.allPaths where !keptPaths.contains(path) {
       // Check if it's a symlink and resolve the blob
-      if let dest = try? fm.destinationOfSymbolicLink(atPath: path) {
-        // dest is relative like "../../blobs/{hash}", resolve it
-        let symlinkDir = URL(fileURLWithPath: path).deletingLastPathComponent()
-        let blobAbsolute = symlinkDir.appendingPathComponent(dest).standardized.path
-        blobsToDelete.insert(blobAbsolute)
+      if let blob = blobPath(ofSymlink: path) {
+        blobsToDelete.insert(blob)
         symlinksToDelete.append(path)
       } else if fm.fileExists(atPath: path) {
         // Direct file (not a symlink) — just delete it
@@ -407,7 +456,7 @@ enum HFCache {
     for symlink in symlinksToDelete {
       try? fm.removeItem(atPath: symlink)
     }
-    for blob in blobsToDelete {
+    for blob in blobsToDelete.subtracting(keptBlobs) {
       if fm.fileExists(atPath: blob) {
         try fm.removeItem(atPath: blob)
       }
@@ -416,6 +465,18 @@ enum HFCache {
     // Clean up empty directories
     let repoBase = cacheDir.appendingPathComponent(repoDir)
     cleanEmptyDirs(at: repoBase)
+  }
+
+  /// The absolute path of the blob a snapshot symlink points at, nil when
+  /// `path` isn't a symlink. Both sides of `deleteModelFiles`' in-use check go
+  /// through here, so the paths they compare are built the same way.
+  private static func blobPath(ofSymlink path: String) -> String? {
+    guard let dest = try? FileManager.default.destinationOfSymbolicLink(atPath: path) else {
+      return nil
+    }
+    // dest is relative like "../../blobs/{hash}", resolve it
+    let symlinkDir = URL(fileURLWithPath: path).deletingLastPathComponent()
+    return symlinkDir.appendingPathComponent(dest).standardized.path
   }
 
   /// Recursively removes empty directories under the given path.

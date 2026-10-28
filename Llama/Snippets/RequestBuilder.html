@@ -687,8 +687,8 @@ function highlight(text) {
 // Caveats the snippet itself can't express -- server flags, model support.
 function caveats() {
   const c = [];
-  // No --jinja note: the app always starts the server with it, so tool calling
-  // works out of the box here (unlike a hand-rolled llama-server).
+  // No --jinja note: Jinja templates (which tool calling needs) are the server
+  // default in every llama.cpp build the app supports.
   if (state.image) c.push("For a local file use <code>file://…</code> and start the server with <code>--media-path</code>.");
   if (!state.thinking && state.api === "chat") c.push("Models differ: some honour <code>reasoning_effort</code>, others only <code>chat_template_kwargs</code>. Both are sent.");
   if (!state.thinking && state.api === "anthropic") c.push("This endpoint ignores <code>thinking: {\"type\": \"disabled\"}</code> — <code>chat_template_kwargs</code> is the switch that works.");

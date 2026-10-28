@@ -449,18 +449,34 @@ class LlamaServer {
   /// Builds the `llama serve` launch spec from the current settings. Pure with
   /// respect to process state -- it only reads settings, the resolved binary
   /// path and its version -- so the settings UI can call it to preview the
-  /// command. Returns nil only when no llama binary is installed.
+  /// command. Returns nil when no llama binary has been resolved: none is
+  /// installed, or the launch-time check hasn't finished yet.
   static func buildLaunchSpec() -> LaunchSpec? {
-    guard let llamaPath = LlamaBinaries.llamaPath else { return nil }
+    // The path resolved at launch, not a fresh `LlamaBinaries.llamaPath`:
+    // resolving can run a subprocess, and this runs on the main actor.
+    guard let llamaPath = LlamaInstallManager.shared.currentPath else { return nil }
 
     let presetsPath = UserSettings.appSupportDir.appendingPathComponent("models.ini").path
 
-    let env = [
+    var env = [
       (key: "GGML_METAL_NO_RESIDENCY", value: "1"),
       // Set HF_HUB_CACHE so llama-server can resolve model paths in preset
       (key: "HF_HUB_CACHE", value: UserSettings.hfCacheDirectory.path),
       (key: "LLAMA_CACHE", value: Self.emptyCachePath),
     ]
+
+    // Work around ggml-org/llama.cpp#31272: since b11923 the Metal unary
+    // kernels use a `constexpr` bfloat cast that the Metal compiler on macOS
+    // 15 and older rejects. Metal shaders are compiled at load time by the
+    // OS's compiler, so the whole Metal backend fails to initialize there and
+    // no model loads. Disabling bfloat support skips that code. macOS 26+
+    // compiles it fine, so it keeps bfloat. Drop this once `targetVersion`
+    // includes the upstream fix.
+    if !ProcessInfo.processInfo.isOperatingSystemAtLeast(
+      OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0))
+    {
+      env.append((key: "GGML_METAL_BF16_DISABLE", value: "1"))
+    }
 
     // Order here is purely cosmetic (`serve` ignores flag order) -- it's
     // chosen so the rendered command reads well: the two path flags grouped up
@@ -499,7 +515,8 @@ class LlamaServer {
     }
 
     // Bare toggles (no value) last, so they don't split the value flags above.
-    arguments.append(contentsOf: ["--jinja", "--spec-default"])
+    // No --jinja: it's been the server default since b7353, below the floor.
+    arguments.append("--spec-default")
 
     // Agent mode: enables the server's built-in tools and the UI's CORS/MCP
     // proxy. Opt-in via Settings; off by default because it lets models act
