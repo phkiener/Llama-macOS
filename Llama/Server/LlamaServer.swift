@@ -465,19 +465,6 @@ class LlamaServer {
       (key: "LLAMA_CACHE", value: Self.emptyCachePath),
     ]
 
-    // Work around ggml-org/llama.cpp#31272: since b11923 the Metal unary
-    // kernels use a `constexpr` bfloat cast that the Metal compiler on macOS
-    // 15 and older rejects. Metal shaders are compiled at load time by the
-    // OS's compiler, so the whole Metal backend fails to initialize there and
-    // no model loads. Disabling bfloat support skips that code. macOS 26+
-    // compiles it fine, so it keeps bfloat. Drop this once `targetVersion`
-    // includes the upstream fix.
-    if !ProcessInfo.processInfo.isOperatingSystemAtLeast(
-      OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0))
-    {
-      env.append((key: "GGML_METAL_BF16_DISABLE", value: "1"))
-    }
-
     // Order here is purely cosmetic (`serve` ignores flag order) -- it's
     // chosen so the rendered command reads well: the two path flags grouped up
     // top, then the remaining value-taking flags, and the bare toggles last.
