@@ -54,6 +54,10 @@ enum Catalog {
     /// Macs with more RAM than this, the size is not suggested (e.g. the small
     /// Gemma 4 E-series on 32 GB+ Macs). Absent → the family's cap alone applies.
     let maxMemGb: UInt64?
+    /// Whether the catalog marks this size as the suggested starting point for
+    /// newcomers. The row gets a "Good first model" badge and is listed first.
+    /// Absent → false.
+    let goodFirstModel: Bool?
     let builds: [Build]
   }
 
