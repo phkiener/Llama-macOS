@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-latest
     permissions:
       contents: write
 
@@ -16,9 +16,6 @@ jobs:
 
       - name: Set version for release
         run: sed -i '' 's/MARKETING_VERSION = 0.0.0;/MARKETING_VERSION = ${{ github.ref_name }};/' Llama.xcodeproj/project.pbxproj
-
-      - name: Select Xcode version
-        run: sudo xcode-select -switch /Applications/Xcode_16.4.app
 
       - name: Build archive
         run: xcodebuild -scheme Llama -configuration Release -archivePath build/Llama.xcarchive archive
