@@ -79,7 +79,10 @@ class LlamaServer {
     guard let configured = UserSettings.networkBindAddress else { return nil }
     guard configured != "0.0.0.0" else { return configured }
     guard LocalNetwork.ipv4Addresses().values.contains(configured) else {
-      logger.notice("configured bind address is not on any interface -- using loopback")
+      // Debug level: it runs on every server URL lookup, so it repeats about
+      // once a second while a Tailscale bind waits for its address
+      // (`NetworkExposureGuard`), which logs the wait once itself.
+      logger.debug("configured bind address is not on any interface -- using loopback")
       return nil
     }
     return configured
@@ -204,11 +207,12 @@ class LlamaServer {
   var modelStatuses: [String: ModelLoadState] = [:] {
     didSet { NotificationCenter.default.post(name: .LBModelStatusDidChange, object: self) }
   }
-  /// The ID of the currently active model, derived from `modelStatuses`.
+  /// The IDs of the currently active models, derived from `modelStatuses`.
   /// A model counts as active while it's loaded or in the process of loading.
-  /// `--models-max 1` guarantees at most one such model.
-  var activeModelId: String? {
-    modelStatuses.first { $0.value == .loaded || $0.value == .loading }?.key
+  /// Several can be active at once: the router keeps models loaded for as long
+  /// as they fit in memory together (see `--models-memory-margin`).
+  var activeModelIds: Set<String> {
+    Set(modelStatuses.filter { $0.value == .loaded || $0.value == .loading }.keys)
   }
   // Store observer token for proper cleanup
   private var settingsObserver: NSObjectProtocol?
@@ -377,7 +381,16 @@ class LlamaServer {
       // Env vars as standalone `export` statements -- each flush-left on its
       // own line, no continuation backslash, so the setup reads as a calm list
       // separate from the invocation below.
-      let exportLines = env.map { "export \($0.key)=\(Self.quote($0.value))" }
+      //
+      // The `PATH` line mirrors the append in `launchServerProcess()` (see `homebrewBinDir`).
+      // It's written as `$PATH:...` rather than the expanded value: pasted into
+      // a terminal, an expanded value would replace the user's whole `PATH` for
+      // that session, and it would read differently depending on how the app
+      // was opened (Finder vs a terminal). The `$PATH` form is the same on
+      // every launch, and in a terminal it changes nothing that matters.
+      let exportLines =
+        ["export PATH=\"$PATH:\(LlamaServer.homebrewBinDir)\""]
+        + env.map { "export \($0.key)=\(Self.quote($0.value))" }
 
       // The invocation: binary + subcommand on the first line, each flag
       // hanging-indented below, joined by " \<newline>" so it stays runnable.
@@ -388,10 +401,9 @@ class LlamaServer {
         return prefix + line + suffix
       }.joined(separator: "\n")
 
-      // A blank line sets the exports apart from the command they precede
-      // (no exports -> no leading blank line).
-      return (exportLines.isEmpty ? [cmdBlock] : exportLines + ["", cmdBlock])
-        .joined(separator: "\n")
+      // A blank line sets the exports apart from the command they precede.
+      // There's always at least the `PATH` export, so no empty case.
+      return (exportLines + ["", cmdBlock]).joined(separator: "\n")
     }
 
     /// Minimal shell quoting: wraps a token in single quotes only if it
@@ -408,6 +420,16 @@ class LlamaServer {
   /// lists every GGUF it finds; we manage the model list ourselves via
   /// `--models-preset`. A fixed `/tmp` path keeps the rendered command short.
   nonisolated static let emptyCachePath = "/tmp/llama-empty-cache"
+
+  /// Homebrew's bin dir, appended to the server's `PATH`. llama.cpp finds
+  /// `ffmpeg` and `ffprobe` (needed for video input) through `PATH`, and an app
+  /// opened from Finder or the Dock gets only the system default
+  /// (`/usr/bin:/bin:/usr/sbin:/sbin`) -- the user's shell setup, where
+  /// Homebrew adds itself, never runs. Appended rather than prepended so
+  /// anything the inherited `PATH` already resolves keeps winning. Only the
+  /// Apple Silicon location: the app doesn't run on Intel Macs, where Homebrew
+  /// lives in `/usr/local/bin`.
+  nonisolated static let homebrewBinDir = "/opt/homebrew/bin"
 
   /// Where the server writes its log (`--log-file`). `~/Library/Logs/<App>` is
   /// the macOS convention for app logs, and Console.app lists `.log` files there
@@ -428,15 +450,13 @@ class LlamaServer {
   /// away -- `localhost:<port>`, which most OpenAI-compatible clients default
   /// to, would stop answering even on this Mac, and start answering again
   /// whenever the address went away and we fell back to loopback. Listing
-  /// loopback alongside keeps localhost working in every mode.
+  /// loopback alongside keeps localhost working in every mode. Every engine
+  /// at or above `floorVersion` accepts a list (llama.cpp PR #28690).
   ///
-  /// Only engines from `multiHostVersion` on accept a list; older ones (and an
-  /// unreadable version) get the single address, as before. `0.0.0.0` already
-  /// covers loopback, and repeating `127.0.0.1` would fail the second bind.
+  /// `0.0.0.0` already covers loopback, and repeating `127.0.0.1` would fail
+  /// the second bind.
   private static func boundAddresses(for bindAddress: String) -> [String] {
-    guard bindAddress != "0.0.0.0", bindAddress != "127.0.0.1",
-      let version = LlamaInstallManager.shared.currentVersion,
-      version >= LlamaBinaries.multiHostVersion
+    guard bindAddress != "0.0.0.0", bindAddress != "127.0.0.1"
     else { return [bindAddress] }
     return ["127.0.0.1", bindAddress]
   }
@@ -458,7 +478,7 @@ class LlamaServer {
 
     let presetsPath = UserSettings.appSupportDir.appendingPathComponent("models.ini").path
 
-    var env = [
+    let env = [
       (key: "GGML_METAL_NO_RESIDENCY", value: "1"),
       // Set HF_HUB_CACHE so llama-server can resolve model paths in preset
       (key: "HF_HUB_CACHE", value: UserSettings.hfCacheDirectory.path),
@@ -485,7 +505,18 @@ class LlamaServer {
     arguments.append(contentsOf: [
       // Other value-taking flags.
       "--port", String(Self.port),
-      "--models-max", "1",
+      // No cap on the number of loaded models -- memory is the real limit,
+      // and the margin below enforces it: before loading a model, the router
+      // unloads idle models (least recently used first) until the new one
+      // fits while leaving this many MiB free. It's the same margin `--fit`
+      // gets, so the router's budget matches the one the app sizes each
+      // model's context against. The router measures each model up front;
+      // projectors (`mmproj`) and draft models aren't counted yet, so a model
+      // with one can take somewhat more than measured -- the margin absorbs
+      // some of that. Floored at 1 because 0 turns memory accounting off,
+      // which together with no count cap would load models without limit.
+      "--models-max", "0",
+      "--models-memory-margin", String(max(Int(Model.fitTargetMb), 1)),
       "--fit-target", String(Int(Model.fitTargetMb)),
     ])
 
@@ -672,6 +703,13 @@ class LlamaServer {
 
     var environment = ProcessInfo.processInfo.environment
     for (key, value) in spec.env { environment[key] = value }
+    // Add Homebrew to the end of the inherited `PATH` (see `homebrewBinDir`).
+    // Not part of `spec.env`: that holds values we set outright, while this
+    // extends whatever the app inherited -- `displayCommand` renders it as
+    // `export PATH="$PATH:..."` to match. A duplicate entry (an app launched
+    // from a terminal already has it) is harmless: the first match wins.
+    environment["PATH"] = [environment["PATH"], Self.homebrewBinDir]
+      .compactMap { $0 }.joined(separator: ":")
     process.environment = environment
 
     process.standardOutput = Pipe()
@@ -721,7 +759,7 @@ class LlamaServer {
     // Set to .idle before terminating so the handler knows this is intentional
     state = .idle
 
-    // Clearing statuses also clears the derived `activeModelId`, so a stopped
+    // Clearing statuses also drops it from the derived `activeModelIds`, so a stopped
     // server never leaves a model showing as loaded in the menu.
     modelStatuses = [:]
 
@@ -840,6 +878,12 @@ class LlamaServer {
     return modelStatuses[model.id] == .loading
   }
 
+  /// Checks if the specified model's last load attempt failed. Cleared by the
+  /// next load attempt (optimistically set to `.loading`) or a server restart.
+  func didFailToLoad(model: Model) -> Bool {
+    return modelStatuses[model.id] == .failed
+  }
+
   /// Switch the active model in the UI. In Router Mode, this doesn't restart the server,
   /// but updates what Llama considers the "current" model.
   func loadModel(_ model: Model) {
@@ -858,7 +902,7 @@ class LlamaServer {
     }
 
     // Optimistically set status to loading for immediate UI feedback. This also
-    // makes the model the derived `activeModelId`. Polling updates to .loaded
+    // makes the model one of the derived `activeModelIds`. Polling updates to .loaded
     // once the server confirms.
     modelStatuses[model.id] = .loading
 
@@ -872,7 +916,7 @@ class LlamaServer {
   /// Deselects the current model in the UI.
   func unloadModel(_ model: Model) {
     // Optimistically set status to unloaded for immediate UI feedback (which
-    // also clears the derived `activeModelId`). Polling confirms once the
+    // also drops it from the derived `activeModelIds`). Polling confirms once the
     // server acknowledges.
     modelStatuses[model.id] = .unloaded
 

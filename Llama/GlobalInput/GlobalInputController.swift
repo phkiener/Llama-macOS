@@ -197,9 +197,19 @@ final class GlobalInputController {
     // Always pass a concrete `?model=`. Handing the WebUI `?q=` with no model is
     // a dead path: its auto-send has no "pick a model first" fallback, so it
     // either 400s or spins on "Loading models…" forever.
-    components.queryItems = [
-      URLQueryItem(name: "q", value: prompt),
-      URLQueryItem(name: "model", value: model.id),
+    //
+    // Encode the values ourselves: `queryItems` leaves `+` as is (it's legal
+    // in a query), but the WebUI reads the query with `URLSearchParams`, which
+    // decodes `+` as a space -- so "C++" arrived as "C  ". `&` and `=` are
+    // encoded too, so a prompt can't split into extra params.
+    var allowed = CharacterSet.urlQueryAllowed
+    allowed.remove(charactersIn: "+&=")
+    func encode(_ value: String) -> String {
+      value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+    components.percentEncodedQueryItems = [
+      URLQueryItem(name: "q", value: encode(prompt)),
+      URLQueryItem(name: "model", value: encode(model.id)),
     ]
 
     guard let url = components.url else {
@@ -232,9 +242,11 @@ final class GlobalInputController {
     if let last = UserSettings.lastUsedModelId, installedIds.contains(last) {
       return last
     }
-    // 2. Whatever is loaded right now.
-    if let active = LlamaServer.shared.activeModelId, installedIds.contains(active) {
-      return active
+    // 2. Whatever is loaded right now -- the first in list order if several
+    //    are, so the pick doesn't vary between opens.
+    let active = LlamaServer.shared.activeModelIds
+    if let loaded = installed.first(where: { active.contains($0.id) }) {
+      return loaded.id
     }
     // 3. No history and nothing loaded (fresh install / cleared prefs): fall
     //    back to the smallest installed model -- fastest to load and respond,

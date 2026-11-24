@@ -279,6 +279,7 @@ final class MenuController: NSObject, NSMenuDelegate {
           id: model.id,
           color: Theme.Colors.textPrimary,
           hasVision: model.hasVisionSupport,
+          hasAudio: model.hasAudioInput,
           draftHead: model.draftHead,
           kind: model.kind,
           showTags: collidingKeys.contains(ModelIdParser.displayKey(model.id))
@@ -595,6 +596,12 @@ final class MenuController: NSObject, NSMenuDelegate {
       showTags: showTags
     )
     menu.addItem(NSMenuItem.viewItem(with: header))
+    // Right under the title, so it's the first thing seen after a Load that
+    // went nowhere. The page rebuilds on status changes, so it appears as soon
+    // as the server reports the failure and goes away on the next attempt.
+    if server.didFailToLoad(model: model) {
+      menu.addItem(NSMenuItem.viewItem(with: LoadFailureView()))
+    }
     menu.addItem(NSMenuItem.viewItem(with: ExpandedModelDetailsView(
       model: model, server: server)))
 
@@ -684,11 +691,11 @@ final class MenuController: NSObject, NSMenuDelegate {
     // for anything to work -- it's there because "load the model" is what
     // people reach for on a model page, and to warm a big model up before
     // the first request rather than making that request wait on it.
-    // A model counts as active while it's still loading (`activeModelId`), so
+    // A model counts as active while it's still loading (`activeModelIds`), so
     // Unload shows then too -- the slot is never empty mid-load, and unloading
     // a loading model cancels the load (the server kills the instance).
     // Sleeping counts as not active: its memory is already freed, so Load.
-    if server.activeModelId == model.id {
+    if server.activeModelIds.contains(model.id) {
       menu.addItem(NSMenuItem.viewItem(with: ActionItemView(
         title: "Unload", symbol: "eject"
       ) { [weak self] in

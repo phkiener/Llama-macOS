@@ -3,9 +3,13 @@ import Foundation
 /// Presentation-only parse of a model id into a short name plus metadata
 /// chips, mirroring the llama.cpp WebUI's default model rendering
 /// (`tools/ui` `parseModelId`) so a model looks the same in our menu and in
-/// the WebUI's picker. The id itself is never touched — every field here is
-/// derived from the id string, so display can never disagree with what
-/// `curl /v1/models` returns.
+/// the WebUI's picker. The id itself is never touched.
+///
+/// One exception to the pure parse: repos the catalog lists take its family
+/// name ("Gemma 4", not "gemma-4" -- see `Catalog.displayName(forRepo:)`),
+/// since repo casing is each vendor's own and reads inconsistently side by
+/// side. Org and chips still come from the id, and the raw id stays in the
+/// row tooltip.
 ///
 /// Simplified relative to upstream: our ids are always the clean
 /// `{org}/{repo}:{TAG}` shape `Model.makeId` builds, so the file-path,
@@ -142,7 +146,7 @@ enum ModelIdParser {
         tags.append(segments[idx])
       }
     }
-
+      
     return Parsed(org: org, name: name, params: params, quant: quant, tags: tags)
   }
 }

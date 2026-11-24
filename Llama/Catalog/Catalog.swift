@@ -42,14 +42,21 @@ enum Catalog {
     let quant: String?
     let size: String?  // human label, e.g. "5.0 GB"
     let repo: String  // "{org}/{repo}"
+    /// The oldest llama.cpp build that can run this build, as a tag
+    /// (`"b12650"`) -- set when a model needs engine support newer than what
+    /// shipped app versions run (a new architecture, tokenizer, or quant
+    /// type). Lets the catalog list a model as soon as it's published: an app
+    /// whose engine is older hides the suggestion until its engine updates,
+    /// rather than offering a download that can't load. Absent → any engine.
+    let minEngine: String?
   }
 
-  /// A parameter tier within a family, e.g. "Gemma 4 E4B". The catalog's
-  /// `name` is not decoded: rows are titled by the repo's id base, so the
-  /// curated display name is the website's concern only.
+  /// A parameter tier within a family, e.g. Gemma 4's "E4B".
   struct Size: Decodable {
     /// Whether this size supports image input. Absent → false.
     let vision: Bool?
+    /// Whether this size takes audio input (speech, sounds). Absent → false.
+    let audio: Bool?
     /// Memory cap for featuring, like `Family.maxMemGb` but for one size: on
     /// Macs with more RAM than this, the size is not suggested (e.g. the small
     /// Gemma 4 E-series on 32 GB+ Macs). Absent → the family's cap alone applies.
@@ -63,6 +70,12 @@ enum Catalog {
 
   /// A named release line, e.g. "Gemma 4". Holds the shared metadata.
   struct Family: Decodable {
+    /// The model's full name, variant included ("Gemma 4", "GLM 5.3 Flash",
+    /// "Ministral 3 Reasoning") -- the catalog makes each variant line its own
+    /// family. Rows of this family's repos are titled with it (see
+    /// `displayName(forRepo:)`). Optional so a family without one can't fail
+    /// decoding the whole catalog.
+    let name: String?
     let brand: String
     /// Whether the catalog flags this family for in-app highlighting. Absent → false.
     let featured: Bool?
